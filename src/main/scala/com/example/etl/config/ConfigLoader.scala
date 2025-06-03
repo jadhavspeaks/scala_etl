@@ -3,24 +3,23 @@ package com.example.etl.config
 import java.sql.{Connection, DriverManager, ResultSet}
 import java.util.Properties
 import scala.util.{Try, Success, Failure, Using}
-import org.slf4j.LoggerFactory // Added for logging
-import spray.json._ // Spray JSON import
-import com.example.etl.config.JsonConfigProtocol._ // Your custom protocol
+import org.slf4j.LoggerFactory
+import spray.json._
+import com.example.etl.config.JsonConfigProtocol._
 
 object ConfigLoader {
-  private val logger = LoggerFactory.getLogger(this.getClass) // Logger instance
+  private val logger = LoggerFactory.getLogger(this.getClass)
 
   private def csvToList(csv: Option[String]): List[String] = {
     csv.map(_.split(',').map(_.trim).filter(_.nonEmpty).toList).getOrElse(List.empty)
   }
 
-  // Generic JSON string parser
   private def parseJsonString[T](jsonString: Option[String], parser: String => T, fieldName: String): Option[T] = {
-    jsonString.filter(_.trim.nonEmpty).flatMap { str =>
+    jsonString.filter(s => s != null && s.trim.nonEmpty).flatMap { str =>
       Try(parser(str)) match {
         case Success(parsedObject) => Some(parsedObject)
         case Failure(ex) =>
-          logger.warn(s"Failed to parse JSON for $fieldName: ${ex.getMessage}. JSON string was: $str")
+          logger.warn(s"Failed to parse JSON for $fieldName: ${ex.getMessage}. JSON string was: $str", ex) // Log exception
           None
       }
     }
@@ -56,26 +55,45 @@ object ConfigLoader {
   private def mapRowToEtlJobConfig(rs: ResultSet): EtlJobConfig = {
     val schemaMappingsStr = Option(rs.getString("SCHEMA_MAPPING_JSON"))
     val dqRulesStr = Option(rs.getString("DATA_QUALITY_RULES_JSON"))
+    val apiConfigSourceStr = Option(rs.getString("API_SOURCE_CONFIG_JSON"))
+    val sourceType = rs.getString("SOURCE_TYPE")
 
     val schemaMappingsList = parseJsonString[List[SchemaMappingRule]](
-        schemaMappingsStr,
-        _.parseJson.convertTo[List[SchemaMappingRule]],
-        "SchemaMapping"
+        schemaMappingsStr, _.parseJson.convertTo[List[SchemaMappingRule]], "SchemaMapping"
     )
-
     val dataQualityRulesList = parseJsonString[List[DataQualityRule]](
-        dqRulesStr,
-        _.parseJson.convertTo[List[DataQualityRule]],
-        "DataQualityRules"
+        dqRulesStr, _.parseJson.convertTo[List[DataQualityRule]], "DataQualityRules"
     )
+    val apiSourceConfigOpt = if (sourceType == "API") {
+        parseJsonString[ApiSourceConfig](
+            apiConfigSourceStr, _.parseJson.convertTo[ApiSourceConfig], "ApiSourceConfig"
+        )
+    } else {
+        None
+    }
+
+    if (sourceType == "API" && apiSourceConfigOpt.isEmpty && apiConfigSourceStr.exists(_.trim.nonEmpty)) {
+        logger.warn(s"SOURCE_TYPE is API for JOB_ID: ${rs.getString("JOB_ID")} but API_SOURCE_CONFIG_JSON was either missing, empty, or could not be parsed. API configuration will be effectively None.")
+        // Consider if this should be a fatal error depending on requirements
+        // For now, it logs a warning and proceeds with apiSourceConfigOpt as None.
+    }
+
 
     EtlJobConfig(
       jobId = rs.getString("JOB_ID"),
       jobDescription = Option(rs.getString("JOB_DESCRIPTION")),
-      sourceFilePath = rs.getString("SOURCE_FILE_PATH"),
+
+      sourceType = sourceType,
+
+      sourceFilePath = Option(rs.getString("SOURCE_FILE_PATH")),
       sourceFileType = rs.getString("SOURCE_FILE_TYPE"),
       sourceFileDelimiter = Option(rs.getString("SOURCE_FILE_DELIMITER")),
-      sourceHasHeader = rs.getString("SOURCE_HAS_HEADER") == "Y",
+      // Default sourceHasHeader to false if not explicitly set or if it's an API source (where it might not be relevant in the same way)
+      sourceHasHeader = Option(rs.getString("SOURCE_HAS_HEADER")).map(_ == "Y").getOrElse(false),
+
+
+      apiSourceConfig = apiSourceConfigOpt,
+
       targetIcebergNamespace = rs.getString("TARGET_ICEBERG_NAMESPACE"),
       targetIcebergTableName = rs.getString("TARGET_ICEBERG_TABLE_NAME"),
       targetIcebergPartitionColumns = csvToList(Option(rs.getString("TARGET_ICEBERG_PARTITION_COLUMNS"))),
@@ -84,7 +102,6 @@ object ConfigLoader {
       scd2EndDateColumnName = rs.getString("SCD2_END_DATE_COLUMN_NAME"),
       scd2CurrentFlagColumnName = rs.getString("SCD2_CURRENT_FLAG_COLUMN_NAME"),
       asIsLoad = rs.getString("AS_IS_LOAD") == "Y",
-      // Updated fields:
       schemaMappings = schemaMappingsList,
       dataQualityRules = dataQualityRulesList,
       businessTransformationRulesJson = Option(rs.getString("BUSINESS_TRANSFORMATION_RULES_JSON")),
