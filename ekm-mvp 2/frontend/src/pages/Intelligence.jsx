@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { getAnalyticsStats, getHealthReport, getRiskReport, getOnboardingPath, searchPeople, getPersonProfile } from '../api'
+import { useState, useEffect, useCallback } from 'react'
+import { getAnalyticsStats, getHealthReport, getRiskReport, getOnboardingPath, searchPeople, getPersonProfile, getConfig } from '../api'
 import { Spinner, SourceBadge } from '../components/UI'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -12,6 +12,43 @@ const RISK_COLOR = {
 const RISK_ICON = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢' }
 const HEALTH_COLOR = { good: 'text-green-600', warning: 'text-yellow-600', poor: 'text-red-600' }
 const HEALTH_ICON  = { good: '✅', warning: '⚠️', poor: '❌' }
+
+// Teams deep link — opens a chat with the person
+function teamsLink(name, domain) {
+  // Convert "Gandhi, Mihir [TECH]" → "mihir.gandhi@citi.com" (best effort)
+  const clean = name
+    .replace(/\[TECH.*?\]/gi, '')
+    .replace(/\(.*?\)/g, '')
+    .trim()
+
+  // Try "Lastname, Firstname" format
+  const commaMatch = clean.match(/^([^,]+),\s*(.+)$/)
+  if (commaMatch) {
+    const last  = commaMatch[1].trim().toLowerCase().replace(/\s+/g, '.')
+    const first = commaMatch[2].trim().toLowerCase().split(/\s+/)[0]
+    return `https://teams.microsoft.com/l/chat/0/0?users=${first}.${last}@${domain}`
+  }
+
+  // Fallback: use full name as-is
+  const email = clean.toLowerCase().replace(/\s+/g, '.') + '@' + domain
+  return `https://teams.microsoft.com/l/chat/0/0?users=${email}`
+}
+
+function TeamsButton({ name, domain }) {
+  if (!name || !domain) return null
+  return (
+    <a
+      href={teamsLink(name, domain)}
+      target="_blank"
+      rel="noreferrer"
+      onClick={e => e.stopPropagation()}
+      className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full hover:bg-blue-100 transition-colors"
+      title={`Chat with ${name} on Teams`}
+    >
+      💬 Teams
+    </a>
+  )
+}
 
 function StatCard({ label, value, sub, color = 'text-navy-800' }) {
   return (
@@ -255,15 +292,19 @@ function HealthTab() {
 }
 
 // ── Risk Tab ──────────────────────────────────────────────────────────────────
-function RiskTab() {
-  const [data, setData]     = useState(null)
+function RiskTab({ teamsDomain }) {
+  const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all')
+  const [filter, setFilter]   = useState('all')
+  const [expanded, setExpanded] = useState({})
 
   useEffect(() => {
     getRiskReport().then(r => { setData(r.data); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
+
+  const toggleExpand = (topic) =>
+    setExpanded(prev => ({ ...prev, [topic]: !prev[topic] }))
 
   if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
   if (!data)   return <div className="text-gray-500 text-sm">Could not load risk report.</div>
@@ -317,44 +358,81 @@ function RiskTab() {
       <div className="space-y-3">
         {topics.length === 0 && <p className="text-sm text-gray-400">No topics match this filter.</p>}
         {topics.map(topic => (
-          <div key={topic.topic} className={`card p-4 border ${RISK_COLOR[topic.risk_level]}`}>
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-gray-900 capitalize">{topic.topic}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium capitalize ${RISK_COLOR[topic.risk_level]}`}>
-                    {RISK_ICON[topic.risk_level]} {topic.risk_level}
-                  </span>
+          <div key={topic.topic} className={`card border ${RISK_COLOR[topic.risk_level]}`}>
+            {/* Header — always visible */}
+            <div className="p-4 cursor-pointer" onClick={() => toggleExpand(topic.topic)}>
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-900 capitalize">{topic.topic}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium capitalize ${RISK_COLOR[topic.risk_level]}`}>
+                      {RISK_ICON[topic.risk_level]} {topic.risk_level}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {topic.unique_people} contributor{topic.unique_people !== 1 ? 's' : ''} · {topic.total_docs} docs
+                    · <span className="text-blue-500">{expanded[topic.topic] ? '▲ collapse' : '▼ expand'}</span>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">
-                  {topic.unique_people} contributor{topic.unique_people !== 1 ? 's' : ''} · {topic.total_docs} docs
+                <div className="text-right shrink-0">
+                  <div className="text-sm font-bold text-purple-700">{topic.vendor_pct}% vendor</div>
+                  <div className="text-xs text-green-700">{topic.internal_pct}% internal</div>
                 </div>
               </div>
-              <div className="text-right shrink-0">
-                <div className="text-sm font-bold text-purple-700">{topic.vendor_pct}% vendor</div>
-                <div className="text-xs text-green-700">{topic.internal_pct}% internal</div>
+
+              {/* Vendor/internal bar */}
+              <div className="w-full bg-green-100 rounded-full h-2 mb-3">
+                <div className="bg-purple-500 h-2 rounded-full" style={{ width: `${topic.vendor_pct}%` }} />
+              </div>
+
+              {/* Contributors with Teams button */}
+              <div className="flex flex-wrap gap-2">
+                {topic.top_contributors.map(c => (
+                  <div key={c.name} className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full border ${
+                    c.type === 'vendor'   ? 'bg-purple-50 border-purple-200 text-purple-800' :
+                    c.type === 'internal' ? 'bg-green-50 border-green-200 text-green-800' :
+                                            'bg-gray-50 border-gray-200 text-gray-600'
+                  }`}>
+                    <span>{c.type === 'vendor' ? '🔵' : c.type === 'internal' ? '🟢' : '⚪'}</span>
+                    <span className="font-medium">{c.name}</span>
+                    <span className="text-gray-400 mr-1">{c.count}</span>
+                    <TeamsButton name={c.name} domain={teamsDomain} />
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Vendor/internal bar */}
-            <div className="w-full bg-green-100 rounded-full h-2 mb-3">
-              <div className="bg-purple-500 h-2 rounded-full" style={{ width: `${topic.vendor_pct}%` }} />
-            </div>
-
-            {/* Contributors */}
-            <div className="flex flex-wrap gap-2">
-              {topic.top_contributors.map(c => (
-                <div key={c.name} className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full border ${
-                  c.type === 'vendor'   ? 'bg-purple-50 border-purple-200 text-purple-800' :
-                  c.type === 'internal' ? 'bg-green-50 border-green-200 text-green-800' :
-                                          'bg-gray-50 border-gray-200 text-gray-600'
-                }`}>
-                  <span>{c.type === 'vendor' ? '🔵' : c.type === 'internal' ? '🟢' : '⚪'}</span>
-                  <span className="font-medium">{c.name}</span>
-                  <span className="text-gray-400">{c.count}</span>
+            {/* Expanded — source documents */}
+            {expanded[topic.topic] && topic.top_docs?.length > 0 && (
+              <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 rounded-b-lg">
+                <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Source Documents</p>
+                <div className="space-y-2">
+                  {topic.top_docs.map((doc, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <SourceBadge type={doc.source_type} />
+                      {doc.url ? (
+                        <a href={doc.url} target="_blank" rel="noreferrer"
+                          className="text-sm text-blue-600 hover:underline flex-1 truncate">
+                          {doc.title}
+                        </a>
+                      ) : (
+                        <span className="text-sm text-gray-600 flex-1 truncate">{doc.title}</span>
+                      )}
+                      {doc.updated_at && (
+                        <span className="text-xs text-gray-400 shrink-0">
+                          {doc.updated_at.slice(0, 10)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
+            {expanded[topic.topic] && (!topic.top_docs || topic.top_docs.length === 0) && (
+              <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 rounded-b-lg text-xs text-gray-400">
+                No document links available for this topic.
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -363,7 +441,7 @@ function RiskTab() {
 }
 
 // ── People Tab ────────────────────────────────────────────────────────────────
-function PeopleTab() {
+function PeopleTab({ teamsDomain }) {
   const [query, setQuery]     = useState('')
   const [results, setResults] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -412,7 +490,7 @@ function PeopleTab() {
         <div className="card p-5 space-y-4">
           <div className="flex items-start justify-between">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-bold text-gray-900">{profile.name}</h2>
                 <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
                   profile.type === 'vendor'   ? 'bg-purple-50 border-purple-200 text-purple-700' :
@@ -422,6 +500,7 @@ function PeopleTab() {
                   {profile.type === 'vendor' ? '🔵 Vendor [TECH NE]' :
                    profile.type === 'internal' ? '🟢 Internal [TECH]' : '⚪ Unknown'}
                 </span>
+                <TeamsButton name={profile.name} domain={teamsDomain} />
               </div>
               <p className="text-sm text-gray-500 mt-0.5">
                 {profile.total_docs} documents · Last active: {profile.last_active || 'unknown'}
@@ -474,8 +553,12 @@ function PeopleTab() {
                 {profile.recent_docs.map((doc, i) => (
                   <div key={i} className="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0">
                     <SourceBadge type={doc.source_type} />
-                    <a href={doc.url} target="_blank" rel="noreferrer"
-                      className="text-sm text-blue-600 hover:underline flex-1 truncate">{doc.title}</a>
+                    {doc.url ? (
+                      <a href={doc.url} target="_blank" rel="noreferrer"
+                        className="text-sm text-blue-600 hover:underline flex-1 truncate">{doc.title}</a>
+                    ) : (
+                      <span className="text-sm text-gray-600 flex-1 truncate">{doc.title}</span>
+                    )}
                     <span className="text-xs text-gray-400 shrink-0">{doc.updated_at}</span>
                   </div>
                 ))}
@@ -498,7 +581,7 @@ function PeopleTab() {
                 className="card p-4 hover:shadow-md cursor-pointer transition-shadow">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-gray-900 text-sm">{person.name}</span>
                       {person.type === 'vendor' && (
                         <span className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded-full">🔵 Vendor</span>
@@ -509,7 +592,10 @@ function PeopleTab() {
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5">Last active: {person.last_active || 'unknown'}</p>
                   </div>
-                  <span className="text-sm font-bold text-teal-600">{person.doc_count} docs</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-sm font-bold text-teal-600">{person.doc_count} docs</span>
+                    <TeamsButton name={person.name} domain={teamsDomain} />
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {person.sources?.map(s => <SourceBadge key={s} type={s} />)}
@@ -617,7 +703,13 @@ const TABS = [
 ]
 
 export default function Intelligence() {
-  const [tab, setTab] = useState('analytics')
+  const [tab, setTab]             = useState('analytics')
+  const [teamsDomain, setTeamsDomain] = useState('citi.com')
+
+  useEffect(() => {
+    getConfig().then(r => { if (r.data?.teams_domain) setTeamsDomain(r.data.teams_domain) })
+      .catch(() => {})
+  }, [])
 
   return (
     <div className="space-y-4">
@@ -643,9 +735,9 @@ export default function Intelligence() {
       {/* Tab content */}
       <div>
         {tab === 'analytics'  && <AnalyticsTab />}
-        {tab === 'risk'       && <RiskTab />}
+        {tab === 'risk'       && <RiskTab teamsDomain={teamsDomain} />}
         {tab === 'health'     && <HealthTab />}
-        {tab === 'people'     && <PeopleTab />}
+        {tab === 'people'     && <PeopleTab teamsDomain={teamsDomain} />}
         {tab === 'onboarding' && <OnboardingTab />}
       </div>
     </div>

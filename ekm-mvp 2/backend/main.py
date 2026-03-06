@@ -68,4 +68,10 @@ app.include_router(intelligence_router)
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0-mvp"}
+    return {"status": "ok", "version": "2.0.0-mvp"}
+
+@app.get("/api/config")
+async def get_config():
+    """Frontend config — exposes non-sensitive settings."""
+    s = get_settings()
+    return {"teams_domain": s.teams_domain}

@@ -20,6 +20,8 @@ export const listDocuments = (sourceType, page = 1) =>
 
 export const getDocument = (id) => api.get(`/documents/${id}`)
 
+export const getConfig = () => api.get('/config')
+
 export const healthCheck = () => api.get('/health')
 
 // People

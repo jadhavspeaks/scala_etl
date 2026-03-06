@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     https_proxy:        str = ""   # e.g. http://127.0.0.1:9000
     http_proxy:         str = ""
 
+    # ── Teams integration ─────────────────────────────────────────────────────
+    teams_domain:       str = "citi.com"  # used to build Teams chat deep links
+
     # ── App ───────────────────────────────────────────────────────────────────
     sync_interval_minutes: int = 60
     max_results_per_page:  int = 20

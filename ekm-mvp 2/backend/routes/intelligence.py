@@ -195,15 +195,16 @@ async def get_risk():
     cursor = db.documents.find(
         {},
         {"source_type": 1, "source": 1, "author": 1, "metadata": 1,
-         "tags": 1, "title": 1, "updated_at": 1}
+         "tags": 1, "title": 1, "updated_at": 1, "url": 1}
     )
     all_docs = await cursor.to_list(length=50000)
 
     # ── Per-topic contributor analysis ────────────────────────────────────────
-    # Group by project tag (Jira project key, Confluence space, repo name)
     topic_people: dict[str, dict[str, dict]] = defaultdict(lambda: defaultdict(lambda: {
         "type": "unknown", "count": 0, "roles": set()
     }))
+    # Also track top docs per topic for drill-down links
+    topic_docs: dict[str, list] = defaultdict(list)
 
     for doc in all_docs:
         st = doc.get("source_type", "")
@@ -240,10 +241,21 @@ async def get_risk():
             person = person.strip()
             if not person:
                 continue
-            for topic in topics[:3]:  # max 3 tags per doc
+            for topic in topics[:3]:
                 topic_people[topic][person]["type"] = _classify(person)
                 topic_people[topic][person]["count"] += 1
                 topic_people[topic][person]["roles"].add(role)
+
+        # Store doc reference per topic (for drill-down)
+        for topic in topics[:3]:
+            if len(topic_docs[topic]) < 8:
+                topic_docs[topic].append({
+                    "title":       doc.get("title", ""),
+                    "source_type": st,
+                    "url":         doc.get("url", ""),
+                    "updated_at":  doc.get("updated_at").isoformat()
+                        if isinstance(doc.get("updated_at"), datetime) else "",
+                })
 
     # ── Build risk alerts ─────────────────────────────────────────────────────
     risk_topics = []
@@ -293,6 +305,7 @@ async def get_risk():
             "internal_pct":   internal_pct,
             "risk_level":     risk_level,
             "concentration":  concentration,
+            "top_docs":       topic_docs.get(topic, [])[:6],
             "top_contributors": [
                 {
                     "name":  name,
