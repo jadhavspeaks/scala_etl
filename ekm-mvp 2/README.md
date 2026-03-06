@@ -52,6 +52,37 @@ Knowledge lives in silos. Engineers work in Jira. Processes live in Confluence. 
   - **Signal 3 — Static diff analysis**: new/modified/deleted functions, new API endpoints, DB changes, new imports
   - **Signal 4 — Architecture docs**: matches module names against Confluence/SharePoint → architectural context
 
+### 🧠 Intelligence Dashboard (NEW)
+A dedicated **Intelligence** page with 5 tabs — built entirely on existing indexed data, no new data sources needed:
+
+#### 📊 Analytics
+- Search volume chart (daily, 7/30/90 day window)
+- Top queries ranked by frequency
+- **Zero-result query tracking** — surfaces knowledge gaps (searches with no answers)
+- Source filter usage breakdown
+
+#### 🔴 Risk & Vendor Intelligence
+- **Vendor dependency alerts** — detects `[TECH NE]` suffix in contributor names
+- Per-topic risk scoring: 🔴 Critical / 🟠 High / 🟡 Medium / 🟢 Low
+- Identifies topics where all knowledge is held by external vendors
+- Knowledge concentration risk — topics with only 1-2 contributors
+
+#### ❤️ Health
+- Content freshness per source (% updated in 30/90/365 days)
+- **Jira ↔ Confluence link audit** — what % of tickets have documentation
+- Stale content list (180+ days without update)
+- Untouched knowledge — docs nobody has ever searched for
+
+#### 👤 People Search
+- Search contributors by name across all sources
+- Full contribution profile — roles, sources, top topics, recent docs
+- Internal vs vendor classification (`[TECH]` vs `[TECH NE]`)
+
+#### 🎓 Onboarding Paths
+- Enter any topic/system → curated reading list ranked by BM25 relevance
+- Surfaces best docs from each source in priority order
+- Freshness indicator per document
+
 ### Data Sources
 | Source | Auth | Content |
 |--------|------|---------|
@@ -258,10 +289,28 @@ MAX_RESULTS_PER_PAGE=20
 | `GET` | `/api/documents?source_type=github` | Browse filtered by source |
 | `GET` | `/api/documents/{id}` | Full document with entities |
 | `GET` | `/api/explain/{id}` | 4-signal code explanation for GitHub docs |
+| `GET` | `/api/people/search?q={name}` | Search contributors by name |
+| `GET` | `/api/people/{name}` | Full contribution profile for a person |
+| `GET` | `/api/analytics/stats?days=30` | Search trends, top queries, zero results |
+| `GET` | `/api/analytics/searches` | Recent search history |
+| `GET` | `/api/intelligence/health` | Content freshness, audit, stale docs |
+| `GET` | `/api/intelligence/risk` | Vendor dependency + concentration risk |
+| `GET` | `/api/intelligence/onboarding?topic={topic}` | Curated reading path for a topic |
 
 ---
 
 ## 🗺️ Roadmap
+
+### ✅ Phase 1 — MVP (DONE)
+- [x] Unified BM25 search across Jira, Confluence, GitHub
+- [x] SME ranking with recency weighting
+- [x] Entity extraction and cross-linking
+- [x] GitHub code intelligence (4-signal explain)
+- [x] Incremental sync with APScheduler
+- [x] Intelligence dashboard — Analytics, Risk, Health, People, Onboarding
+- [x] Vendor dependency detection (`[TECH NE]` signal)
+- [x] Fuzzy search fallback
+- [x] Search logging and analytics
 
 ### Phase 2 — Search Quality
 - [ ] Vector / semantic search (MongoDB Atlas Vector Search)
@@ -269,7 +318,8 @@ MAX_RESULTS_PER_PAGE=20
 - [ ] Highlighted matching snippets
 
 ### Phase 3 — Access & Security
-- [ ] SSO via Azure AD / Okta
+- [ ] SSO via Azure AD / Okta (requires IT app registration)
+- [ ] SharePoint via Azure AD app registration
 - [ ] Per-user permission filtering (respect source ACLs)
 - [ ] Audit logging
 
@@ -278,10 +328,11 @@ MAX_RESULTS_PER_PAGE=20
 - [ ] Slack public channels
 - [ ] Google Drive / Workspace
 
-### Phase 5 — Intelligence
+### Phase 5 — AI Layer
 - [ ] RAG-based Q&A (answers, not just links)
 - [ ] Knowledge graph — relationships between docs, people, topics
 - [ ] Duplicate detection across sources
+- [ ] Auto-summarisation per document
 
 ---
 
