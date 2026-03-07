@@ -13,8 +13,7 @@ sync_router = APIRouter(prefix="/api/sync", tags=["sync"])
 async def trigger_sync(body: SyncRequest = SyncRequest()):
     """Trigger a sync for one or all sources. Runs in background."""
     source = body.source_type
-    # Run sync (for MVP runs synchronously; in production use a task queue)
-    results = await run_sync(source)
+    results = await run_sync(source, force_full=body.force_full)
     return {"message": "Sync complete", "results": results}
 
 

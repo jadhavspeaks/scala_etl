@@ -95,6 +95,7 @@ class DashboardStats(BaseModel):
 
 class SyncRequest(BaseModel):
     source_type: Optional[SourceType] = None   # None = sync all
+    force_full:  bool = False                  # True = ignore last_sync, pull everything
 
 
 class SyncLog(BaseModel):
